@@ -1,0 +1,9 @@
+{
+  "name": "sale-readiness-audit",
+  "displayName": "Sale Readiness Audit",
+  "version": "0.1.0",
+  "description": "Give it a store URL and get a Black Friday / seasonal sale readiness audit: a browser walks the store like shoppers do on desktop and mobile, checks the sale message, product pages, cart, checkout and every email/SMS signup form (where it appears, offer, targeting, mobile fit), and returns an HTML report with evidence, why each gap matters and what to fix.",
+  "author": { "name": "Claspo", "url": "https://claspo.io" },
+  "repository": "https://github.com/Claspo/sale-readiness-auditor",
+  "keywords": ["black friday", "bfcm", "cro", "ecommerce", "audit", "popups", "email capture", "shopify"]
+}

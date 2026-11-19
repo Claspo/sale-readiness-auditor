@@ -1,0 +1,12 @@
+{
+  "name": "claspo",
+  "owner": { "name": "Claspo", "url": "https://claspo.io" },
+  "description": "Claspo's plugins for e-commerce teams and agencies.",
+  "plugins": [
+    {
+      "name": "sale-readiness-audit",
+      "source": "./",
+      "description": "Black Friday / seasonal sale readiness audit of a store from its URL: sale message, products, cart, checkout and email/SMS signup forms, with evidence and fixes."
+    }
+  ]
+}
