@@ -247,7 +247,17 @@ class Device:
         return list(seen.values())
 
     async def clear(self, page):
-        await self.answer_cookies(page)
+        if not await self.answer_cookies(page):
+            # consent tools that render in shadow DOM: role locators pierce it
+            for name in (r"^(decline|reject all|reject|necessary only|only necessary|deny)$", r"^(accept all|accept|allow all|i agree|got it|ok)$"):
+                try:
+                    loc = page.get_by_role("button", name=re.compile(name, re.I))
+                    if await loc.count() and await loc.first.is_visible():
+                        await loc.first.click(timeout=3000)
+                        await page.wait_for_timeout(600)
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
         try:
             snap = await page.evaluate(JS["detect"])
             for o in snap["overlays"]:
@@ -481,7 +491,12 @@ async def discover(browser, base: str) -> dict:
         plan["platform"] = f.get("platform")
         host = urlparse(origin).netloc.replace("www.", "")
         same = lambda u: urlparse(urljoin(origin, u)).netloc.replace("www.", "") == host  # noqa: E731
-        links = [l for k in ("header", "footer") for l in ((f.get(k) or {}).get("links") or [])]
+        base_dom = ".".join(host.split(".")[-3:] if re.search(r"\.(co|com|org|net)\.[a-z]{2}$", host) else host.split(".")[-2:])
+        own = lambda u: urlparse(urljoin(origin, u)).netloc.endswith(base_dom)  # noqa: E731 - help.store.com counts
+        # menus hide their links until hovered, so read every header/nav link, visible or not
+        hidden = await page.evaluate(r"""() => [...document.querySelectorAll('header a[href], nav a[href], [class*="menu"] a[href]')]
+            .map(a => ({h: a.getAttribute('href'), t: (a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)}))""")
+        links = [l for k in ("header", "footer") for l in ((f.get(k) or {}).get("links") or [])] + hidden
         links += [{"h": c.get("href"), "t": c.get("text", "")} for c in f.get("category_tiles") or []]
         hrefs = [urljoin(origin, l["h"]) for l in links if l.get("h") and same(l["h"])]
         for pat in [r"/collections/(?!all\b)[^/?#]+$", r"/collections/", r"/(category|categories|shop|c)/", r"sale|deal|black"]:
@@ -489,8 +504,14 @@ async def discover(browser, base: str) -> dict:
             if m:
                 plan["category"] = m[0]
                 break
-        faq = [h for h in hrefs if re.search(r"faq|help|support|frequently", h, re.I)]
-        plan["faq"] = faq[0] if faq else (urljoin(origin, "/pages/faq") if (plan["platform"] or {}).get("shopify") else None)
+        # the store's general FAQ / help centre: a link named so wins over any page with "faq" in its path
+        faq = [(urljoin(origin, l["h"]), (l.get("t") or "").strip()) for l in links
+               if l.get("h") and own(l["h"]) and re.search(r"faq|help|support|frequently", l["h"] + " " + (l.get("t") or ""), re.I)]
+        named = re.compile(r"^(faqs?|help( cent(re|er))?|support|customer (service|care)|frequently asked questions)$", re.I)
+        faq.sort(key=lambda x: (not named.match(x[1]), len(urlparse(x[0]).path)))
+        plan["faq"] = faq[0][0] if faq else None
+        if not plan.get("category") and (plan["platform"] or {}).get("shopify"):
+            plan["category"] = urljoin(origin, "/collections/all")
         tiles = [urljoin(origin, t["href"]) for t in f.get("product_tiles") or [] if t.get("href")]
         if plan.get("category"):
             try:

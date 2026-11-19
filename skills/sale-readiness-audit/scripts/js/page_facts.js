@@ -172,7 +172,7 @@
       gift_guide: kw(/gift guide|gifts? for (him|her)|gifts? under/),
       press: kw(/as seen (in|on)|featured in|press/),
       sustainability: kw(/sustainab|carbon|eco[- ]friendly|recycled|planet|charity|donat/),
-      delivery_estimate: kw(/(arrives|delivery|delivered|get it) (by|on|between)|estimated delivery|ships (in|within|today)/),
+      delivery_estimate: kw(/(arrives|delivered|get it) (by|on|between)|delivery (by|between)|estimated delivery|ships (in|within|today)|\d+\s?-\s?\d+ (working |business )?days/),
       shipping_cutoff: kw(/order by|cut-?off|last day to order|in time for (christmas|the holidays)/),
       size_guide: kw(/size (guide|chart)|fit guide/),
       chat: kw(/live chat|chat with us|chat now/),
