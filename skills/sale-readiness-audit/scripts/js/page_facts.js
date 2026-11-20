@@ -75,14 +75,23 @@
       text: txt(el, 260)}));
 
   // --- product tiles ------------------------------------------------------------------------
-  const tileLinks = q('a[href*="/products/"], a[href*="/product/"], a[href*="/p/"]').filter(vis);
+  // Product URLs differ by platform (/products/x, /p/123, /dress-123.html, /catalog/item-1), so a link
+  // counts by its card: a picture and a price, the card holding links to one product only.
+  const PRICE = /\d[\d\s.,]*\s?(₴|грн|uah|руб|₽|zł|pln|kč|czk|lei|ron|ft|huf|kr|sek|nok|dkk|chf|€|eur|£|gbp|\$|usd|₹|¥|₺)(?![a-zа-яё])|(\$|€|£|₴|₹|¥|₺)\s?\d|\d[.,]\d{2}\b/i;
+  const urlLooksProduct = h => /\/products?\/|\/p\//.test(h);
+  const notTile = /^(#|javascript:|mailto:|tel:)|\/(cart|basket|checkout|account|customer|login|wishlist|compare|search)\b/i;
+  const tileLinks = q('a[href]').filter(a => { const h = a.getAttribute('href');
+    return !notTile.test(h) && (urlLooksProduct(h) || a.querySelector('img, picture')) && vis(a); });
+  const tileHrefs = new Set(tileLinks.map(a => a.getAttribute('href')));
+  const productsIn = el => new Set([...el.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(h => tileHrefs.has(h))).size;
   const tiles = [];
   const seen = new Set();
   for (const a of tileLinks) {
-    let t = a; for (let i = 0; i < 6 && t.parentElement; i++) { if (/\d[.,]\d{2}|\$|€|£|₴|zł|kr/.test(txt(t.parentElement, 300)) && t.parentElement.querySelectorAll('a[href*="/products/"], a[href*="/product/"]').length <= 3) t = t.parentElement; else break; }
+    let t = a; for (let i = 0; i < 6 && t.parentElement && t.parentElement !== body; i++) { const p = t.parentElement; if (productsIn(p) <= 2 && txt(p, 400).length <= 350) t = p; else break; }
     if (seen.has(t)) continue; seen.add(t);
     const tt = txt(t, 300);
-    if (!/\d/.test(tt)) continue;
+    if (!(PRICE.test(tt) || (urlLooksProduct(a.getAttribute('href')) && /\d/.test(tt)))) continue;
+    if (tiles.some(x => x.href === a.getAttribute('href'))) continue;
     tiles.push({
       text: tt,
       href: a.getAttribute('href'),
@@ -159,9 +168,9 @@
     sections, product_tiles: tiles, category_tiles: catTiles,
     payment_icons, trust_badges, apps, footer: footerInfo, faq, timer_like_text: timerish,
     text_signals: {
-      bfcm: kw(/black friday|cyber monday|bfcm|black week|cyber week|singles day|thanksgiving/),
-      percent_off: kw(/\d{1,2}\s?% (off|discount)|save \d{1,2}\s?%|up to \d{1,2}\s?%/),
-      free_shipping: kw(/free (shipping|delivery)|kostenlose?r? versand|livraison gratuite|envío gratis/),
+      bfcm: kw(/black friday|cyber monday|bfcm|black week|cyber week|singles day|thanksgiving|чорн\S* п.ятниц|черн\S* пятниц|кіберпонеділ|киберпонедельн|czarny piątek|schwarzer freitag|vendredi noir|viernes negro/),
+      percent_off: kw(/\d{1,2}\s?% (off|discount)|save \d{1,2}\s?%|up to \d{1,2}\s?%|[-−–]\s?\d{1,2}\s?%|(знижк|скидк|rabat|descuento|remise|sconto)\S*\s\D{0,15}\d{1,2}\s?%|\d{1,2}\s?% (знижк|скидк|rabat)/),
+      free_shipping: kw(/free (shipping|delivery)|kostenlose?r? versand|livraison gratuite|envío gratis|безкоштовн\S* доставк|бесплатн\S* доставк|darmowa (dostawa|wysyłka)|spedizione gratuita|frete grátis|gratis verzending/),
       free_gift: kw(/free gift|gift with purchase|gwp/),
       returns: kw(/(free|easy|\d+[- ]day) returns?|return policy|money[- ]back/),
       guarantee: kw(/guarantee|warranty/),

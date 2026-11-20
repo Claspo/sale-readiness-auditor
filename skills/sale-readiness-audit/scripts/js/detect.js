@@ -12,11 +12,13 @@
     ['attentive', /attentive|attn\.tv/i], ['postscript', /postscript|ps-desktop|ps-mobile/i],
     ['sumo', /sumo-|sumome/i], ['getsitecontrol', /getsitecontrol|gsc-/i], ['sleeknote', /sleeknote/i],
     ['amped', /\bamped[-_.]/i], ['wheelio', /wheelio/i], ['mailchimp', /mc-modal|mailchimp/i],
-    ['shopify_forms', /shopify-forms|forms\.shopifyapps/i], ['claspo', /claspo/i], ['alia', /\balia-app\b/],
+    ['shopify_forms', /shopify-forms|forms\.shopifyapps/i], ['claspo', /claspo|cl-widget-id/i], ['alia', /\balia-app\b/],
   ];
   const COOKIE = /cookie|consent|gdpr|privacy (settings|preferences)|we use (cookies|technologies)/i;
   // "we don't ship to your country" / country pickers: the store answering the crawler's IP, not the imitated market
   const GEO = /(ship|deliver)(s|ping)? to your (country|region|location)|you('re| are) (visiting|browsing|shopping) from|choose your (country|region|location)|select your (country|region|location)/i;
+  // a page-wide loading mask ("Loading...", Magento's spinner) is not a pop-up
+  const LOADING = /^(loading|please wait|завантаження|зачекайте|загрузка|подождите|chargement|cargando|ładowanie|wird geladen)\W*$/i;
   const shown = el => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
     return r.width > 2 && r.height > 2 && cs.visibility !== 'hidden' && cs.display !== 'none' && parseFloat(cs.opacity) > 0.05; };
 
@@ -68,14 +70,51 @@
       if (!e.shadowRoot) break;  // a page element is on top here
     }
   }
+  // Pop-up apps built from web components (Claspo) nest a shadow root in every component, so text and
+  // fields can sit several shadow roots deep.
+  const rootsIn = el => {
+    const roots = [el];
+    for (let i = 0; i < roots.length && roots.length < 400; i++) {
+      const r = roots[i];
+      if (r.shadowRoot) roots.push(r.shadowRoot);
+      for (const n of r.querySelectorAll('*')) if (n.shadowRoot) roots.push(n.shadowRoot);
+    }
+    return [...new Set(roots)];
+  };
   // shadow roots carry their own <style>; only the rendered text counts
-  const deepText = el => ((el.innerText || '') + ' ' + [el, ...el.querySelectorAll('*')].filter(n => n.shadowRoot)
-    .map(n => [...n.shadowRoot.children].filter(c => !/^(STYLE|SCRIPT|LINK)$/.test(c.tagName)).map(c => c.innerText || c.textContent || '').join(' ')).join(' '));
-  const deepAll = (el, sel) => [...el.querySelectorAll(sel), ...[el, ...el.querySelectorAll('*')].filter(n => n.shadowRoot).flatMap(n => [...n.shadowRoot.querySelectorAll(sel)])];
+  const deepText = el => rootsIn(el).map(root => {
+    const parts = [];
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const p = n.parentElement;
+      if (p && (/^(STYLE|SCRIPT|NOSCRIPT|TEMPLATE)$/.test(p.tagName) || (p.checkVisibility && !p.checkVisibility({ opacityProperty: true, visibilityProperty: true })))) continue;
+      parts.push(n.textContent);
+    }
+    return parts.join(' ');
+  }).join(' ');
+  const deepAll = (el, sel) => rootsIn(el).flatMap(root => [...(root.matches && root.matches(sel) ? [root] : []), ...root.querySelectorAll(sel)]);
+  // A layer that is under page content wherever it is, not under another layer: a drawer parked
+  // behind the page with z-index -1, which no visitor sees. Closed drawers often also drop pointer
+  // events, so hit testing never reaches them and the negative z-index has to decide.
+  const behindPage = el => {
+    if (parseInt(getComputedStyle(el).zIndex, 10) < 0) return true;
+    const r = el.getBoundingClientRect();
+    const x0 = Math.max(r.left, 0), x1 = Math.min(r.right, vw), y0 = Math.max(r.top, 0), y1 = Math.min(r.bottom, vh);
+    let hits = 0;
+    for (const [fx, fy] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+      const stack = stackAt(document, x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy);
+      const i = stack.findIndex(e => e === el || el.contains(e));
+      if (i < 0) continue;
+      hits++;
+      const above = stack.slice(0, i).filter(e => e !== document.documentElement && e !== document.body);
+      if (!above.length || above.some(e => layerOf(e))) return false;
+    }
+    return hits > 0;
+  };
 
   const out = [];
   for (const [el, onTop] of hosts) {
-    if (!shown(el)) continue;
+    if (!shown(el) || (!onTop && behindPage(el))) continue;
     const r = el.getBoundingClientRect();
     const w = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
     const h = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
@@ -83,6 +122,8 @@
       el.getAttribute('data-testid') || '', el.getAttribute('aria-label') || '',
       // Alia mounts a bare fixed <div> with its app in a shadow root: no id or class to match
       window.mountAliaCustomerApp && [el, ...el.querySelectorAll('*')].some(n => n.shadowRoot) ? 'alia-app' : '',
+      // Claspo marks every layout (dialog, floating box, bar, launcher) with this attribute
+      el.hasAttribute('cl-widget-id') || el.querySelector('[cl-widget-id]') ? 'cl-widget-id' : '',
       ...[...el.querySelectorAll('iframe')].map(f => f.src || f.id || f.name || ''),
       ...[...el.querySelectorAll('[class],[id],[data-testid]')].slice(0, 60)
         .map(n => `${n.id} ${typeof n.className === 'string' ? n.className : ''} ${n.getAttribute('data-testid') || ''}`)].join(' ');
@@ -103,7 +144,7 @@
     else if (kTeaser) kind = 'teaser';
     else if ((hasEmail || hasTel || kForm) && !(isBar && !kForm && !vendor)) kind = coverage < 0.04 ? 'teaser' : 'capture_form';
     else if (vendor && vendor !== 'klaviyo') kind = coverage < 0.04 ? 'teaser' : 'vendor_overlay';
-    else if (coverage >= 0.25 && text.length >= 15 && !isBar) kind = 'other_overlay';
+    else if (coverage >= 0.25 && text.length >= 15 && !isBar && !LOADING.test(text)) kind = 'other_overlay';
     if (!kind) continue;
 
     if (!el.dataset.paId) el.dataset.paId = String(Math.random()).slice(2, 10);

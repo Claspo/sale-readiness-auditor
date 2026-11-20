@@ -20,22 +20,28 @@ from pathlib import Path
 HERE = Path(__file__).parent
 CHECKLIST = json.loads((HERE.parent / "checklist.json").read_text(encoding="utf-8"))
 
+# Text patterns cover English, Ukrainian and Russian, plus a few Polish, German, French and Spanish phrases.
 PCT = re.compile(r"(\d{1,2})\s?%")
-USD = re.compile(r"[$€£]\s?(\d{1,4})\s?(off|discount)", re.I)
-FREE_SHIP = re.compile(r"free (shipping|delivery)", re.I)
-GIFT = re.compile(r"free gift|gift with|mystery gift", re.I)
-EARLY = re.compile(r"early access|first access|vip access|be the first", re.I)
-SALE_WORDS = re.compile(r"black friday|cyber monday|bfcm|black week|cyber week|holiday sale|early access|sale", re.I)
-GAME = re.compile(r"spin|wheel|scratch|mystery|try your luck|win", re.I)
-QUIZ = re.compile(r"\?|which|what (are|is) your|tell us|choose|select your|are you", re.I)
-TIMER = re.compile(r"\b\d{1,2}\s*[:hd]\s*\d{1,2}\s*[:m]\s*\d{1,2}", re.I)
-NOT_A_POPUP = re.compile(r"\bcart \(\d+\)|subtotal|your (cart|bag) is empty|proceed to checkout|size (guide|chart)", re.I)
-GEOISH = re.compile(r"shipping to\?|ship to|choose your (country|region)|select your (country|region)|country/region|you('re| are) (in|visiting|shopping from)", re.I)
+USD = re.compile(r"[$€£]\s?(\d{1,4})\s?(off|discount)|[-−–]\s?\d{2,5}\s?(грн|₴|руб|₽|zł)", re.I)
+FREE_SHIP = re.compile(r"free (shipping|delivery)|безкоштовн\w* доставк|бесплатн\w* доставк|darmowa (dostawa|wysyłka)|kostenlose?r? versand"
+                       r"|livraison gratuite|envío gratis", re.I)
+GIFT = re.compile(r"free gift|gift with|mystery gift|подарун|подарок|подарк|prezent|geschenk|cadeau|regalo", re.I)
+EARLY = re.compile(r"early access|first access|vip access|be the first|ранн\w+ доступ|wcześniejszy dostęp", re.I)
+SALE_WORDS = re.compile(r"black friday|cyber monday|bfcm|black week|cyber week|holiday sale|early access|sale|чорн\w* п.ятниц|черн\w* пятниц"
+                        r"|кіберпонеділ|киберпонедельн|розпродаж|распродаж|ранн\w+ доступ|czarny piątek|wyprzeda|schwarzer freitag|soldes|rebajas", re.I)
+GAME = re.compile(r"spin|wheel|scratch|mystery|try your luck|win|колес|крутн|виграй|выиграй|розіграш|розыгрыш|wygraj|gewinn", re.I)
+QUIZ = re.compile(r"\?|which|what (are|is) your|tell us|choose|select your|are you|оберіть|выберите", re.I)
+TIMER = re.compile(r"\b\d{1,2}\s*[:hdдч]\s*\d{1,2}\s*[:mмх]\s*\d{1,2}", re.I)
+NOT_A_POPUP = re.compile(r"\bcart \(\d+\)|subtotal|your (cart|bag) is empty|proceed to checkout|size (guide|chart)|кошик порожній|корзина пуста"
+                         r"|оформити замовлення|оформить заказ|таблиц\w* розмір|таблиц\w* размер|warenkorb ist leer|votre panier est vide", re.I)
+GEOISH = re.compile(r"shipping to\?|ship to|choose your (country|region)|select your (country|region)|country/region|you('re| are) (in|visiting|shopping from)"
+                    r"|оберіть (країну|регіон)|выберите (страну|регион)", re.I)
+CONSENT_BOX = re.compile(r"email|news|offer|marketing|sms|text me|розсилк|рассылк|новин|новост|акці|акци|пропозиц|предложен|wiadomo|angebote", re.I)
 ENGLISH = re.compile(r"\b(the|your|get|off|sign up|subscribe|email|first order|and|you|discount|join)\b", re.I)
 
 
 def sig(text: str) -> str:
-    return re.sub(r"[^a-z0-9% ]", "", (text or "").lower())[:70].strip()
+    return re.sub(r"[^\w% ]|_", "", (text or "").lower())[:70].strip()
 
 
 def offer(text: str) -> dict:
@@ -78,6 +84,13 @@ def main() -> None:
     def forms(dev, scen, after_exit=None):
         return events(dev, scen, "capture_form", after_exit)
 
+    def unopened(dev, scen, after_exit=None):
+        """Signup-app pop-ups with no contact field, not even behind the main button the walk clicked."""
+        return [e for e in events(dev, scen, "vendor_overlay", after_exit) if not e.get("has_email") and not e.get("has_tel")]
+
+    def full_cart(dev):
+        return devs.get(dev, {}).get("pages", {}).get("add_to_cart") not in (None, "failed")
+
     def ev_ref(e):
         return f"{e['device']} {e['scenario']} at {e.get('t_s')} s: \"{(e.get('text') or '')[:110]}\""
 
@@ -110,6 +123,10 @@ def main() -> None:
             put(iid, "done", "; ".join(ev_ref(per[d][0]) for d in have), shots_of([per[d][0] for d in have]))
         elif have:
             put(iid, "partial", f"Only on {', '.join(have)}: " + "; ".join(ev_ref(per[d][0]) for d in have) + f". Nothing with a contact field on {', '.join(set(D) - set(have))}.", shots_of([per[d][0] for d in have]))
+        elif any(unopened(d, scen) for d in D):
+            un = [e for d in D for e in unopened(d, scen)]
+            put(iid, None, f"A {un[0].get('vendor') or 'pop-up app'} layer without a contact field appeared ({ev_ref(un[0])}) and the walk found no field behind it: "
+                "judge from the screenshot whether it is a signup form.", screenshots_to_view=shots_of(un)[:4])
         else:
             put(iid, "missing", f"No pop-up with an email or phone field appeared in {scen} on {', '.join(D)}." + GEO_NOTE,
                 [s["file"] for d in D for s in devs[d]["shots"] if s["scenario"] in (scen, "home") and s["label"] in ("first_view", "above_fold", "top")][:2])
@@ -118,12 +135,20 @@ def main() -> None:
     for iid, scen in (("E3", "browse_exit"), ("E4", "exit_cart")):
         per = {d: forms(d, scen, after_exit=True) for d in D}
         tried = [d for d in D if any(e.get("event") == "exit_intent_simulated" and e["scenario"] == scen for e in devs[d]["events"])]
+        empty = [d for d in tried if scen == "exit_cart" and not full_cart(d)]
+        tried = [d for d in tried if d not in empty]
         have = [d for d in tried if per[d]]
-        if not tried:
+        if empty and not tried:
+            put(iid, "cannot_verify", f"The cart stayed empty on {', '.join(empty)} (adding a product failed), so leaving with a full cart was not tried.")
+        elif not tried:
             put(iid, "cannot_verify", f"No exit attempt was made in {scen}: " + ("; ".join(e for d in D for e in devs[d]["errors"] if scen in e) or "scenario did not run") + ".")
         elif have:
             st = "done" if len(have) == len(tried) else "partial"
             put(iid, st, "; ".join(ev_ref(per[d][0]) for d in have) + ("" if st == "done" else f". Nothing after exit on {', '.join(set(tried) - set(have))}."), shots_of([per[d][0] for d in have]))
+        elif any(unopened(d, scen, after_exit=True) for d in tried):
+            un = [e for d in tried for e in unopened(d, scen, after_exit=True)]
+            put(iid, None, f"After the exit attempt a layer without a contact field appeared ({ev_ref(un[0])}) and the walk found no field behind it: "
+                "judge from the screenshot whether it is a signup form.", screenshots_to_view=shots_of(un)[:4])
         else:
             put(iid, "missing", f"Exit intent tried three times on {', '.join(tried)} ({scen}); no form appeared." + GEO_NOTE)
 
@@ -205,7 +230,7 @@ def main() -> None:
         put("G2", "done", "The signup form never shared the screen with a cookie banner or another pop-up.")
 
     # H: offer
-    texts = [e["text"] for e in all_forms]
+    texts = [f"{e['text']} {e.get('next_step_text') or ''}".strip() for e in all_forms]
     if not texts:
         for i in ("H1", "H2", "H3"):
             put(i, "not_applicable", "No signup form seen.")
@@ -238,11 +263,11 @@ def main() -> None:
         for i in ("I1", "I2", "I3", "I4", "I5"):
             put(i, "not_applicable", "No signup form seen.")
     else:
-        first_inputs = {tuple(sorted(set(e.get("inputs") or []))) for e in all_forms}
-        no_field_first = [e for e in all_forms if not e.get("has_email") and not e.get("has_tel")]
+        first_inputs = {() if e.get("two_step") else tuple(sorted(set(e.get("inputs") or []))) for e in all_forms}
+        no_field_first = [e for e in all_forms if e.get("two_step") or (not e.get("has_email") and not e.get("has_tel"))]
         put("I1", "info", "A step before the contact field (button or question first): " + ("yes" if no_field_first else "not seen") + f". First-view inputs: {sorted(first_inputs)}.")
         put("I2", "info", "Phone field: " + ("yes" if any(e.get("has_tel") for e in all_forms) else "not on the first view"))
-        put("I3", "info", "Question or choice: " + ("yes" if any(QUIZ.search(e["text"]) and not e.get("has_email") for e in all_forms) else "not seen"))
+        put("I3", "info", "Question or choice: " + ("yes" if any(QUIZ.search(e["text"]) and (e.get("two_step") or not e.get("has_email")) for e in all_forms) else "not seen"))
         put("I4", "info", "Game: " + ("yes" if any(GAME.search(e["text"]) for e in all_forms) else "not seen"))
         put("I5", "info", "Timer in the form: " + ("yes" if any(TIMER.search(e["text"]) for e in all_forms) else "not seen"))
 
@@ -310,15 +335,20 @@ def main() -> None:
     if not alt:
         put("M1", "not_applicable", "No other language version declared (hreflang).")
     else:
-        lf = forms("desktop", "lang")
+        signup = ("capture_form", "teaser")
+        lf = sorted((e for e in events("desktop", "lang") if e["kind"] in signup), key=lambda e: e["kind"] != "capture_form")
         if not lf:
             put("M1", "cannot_verify", f"No signup form appeared on the {alt['lang']} homepage ({alt['href']}).")
         else:
             words = len(re.findall(r"\w+", lf[0]["text"])) or 1
             share = len(ENGLISH.findall(lf[0]["text"])) / words
             en = alt["lang"].lower().startswith("en")
-            put("M1", "done" if en or share < 0.15 else "missing",
-                f"{alt['lang']} homepage form: \"{lf[0]['text'][:110]}\" (English common words {int(share * 100)}%).", shots_of(lf))
+            main_lang = (page("desktop", "home").get("lang") or "")[:2].lower()
+            main_texts = {sig(e["text"]) for e in events("desktop", "home_new") if e["kind"] in signup}
+            untranslated = sig(lf[0]["text"]) in main_texts and alt["lang"][:2].lower() != main_lang
+            put("M1", "missing" if untranslated or not (en or share < 0.15) else "done",
+                f"{alt['lang']} homepage {lf[0]['kind'].replace('_', ' ')}: \"{lf[0]['text'][:110]}\" "
+                + ("(the same text as on the main-language homepage)." if untranslated else f"(English common words {int(share * 100)}%)."), shots_of(lf))
 
     # P1: speed
     lcp = page("mobile", "home").get("lcp_ms") if "mobile" in devs else None
@@ -328,11 +358,11 @@ def main() -> None:
         put("P1", "done" if lcp < 2500 else ("partial" if lcp <= 4000 else "missing"), f"Mobile homepage LCP {lcp / 1000:.1f} s (one lab run on the auditor's connection).")
 
     # D4: checkout consent
-    ck = [page(d, "checkout") for d in D if page(d, "checkout")]
+    ck = [page(d, "checkout") for d in D if page(d, "checkout") and full_cart(d)]
     if not ck:
-        put("D4", "cannot_verify", "Checkout was not reached.")
+        put("D4", "cannot_verify", "Checkout was not reached with a product in the cart." if any(page(d, "checkout") for d in D) else "Checkout was not reached.")
     else:
-        boxes = [b for c in ck for b in c.get("checkboxes", []) if re.search(r"email|news|offer|marketing|sms|text me", b["label"], re.I)]
+        boxes = [b for c in ck for b in c.get("checkboxes", []) if CONSENT_BOX.search(b["label"])]
         if not boxes:
             put("D4", "missing", "No email/SMS marketing checkbox at checkout.")
         elif any(b["checked"] for b in boxes):

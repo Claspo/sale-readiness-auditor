@@ -28,31 +28,33 @@ from urllib.parse import urljoin, quote
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
-from walk import DEVICES, JS, COOKIE_JS  # noqa: E402
+from walk import COOKIE_JS, DEEP_JS, DEVICES, JS, OPEN_STEP_JS  # noqa: E402
 
-CONSENT = re.compile(r"privacy|terms|unsubscribe|consent|agree|msg (&|and) data rates|message frequency|reply stop|marketing (emails|messages)", re.I)
+CONSENT = re.compile(r"privacy|terms|unsubscribe|consent|agree|msg (&|and) data rates|message frequency|reply stop|marketing (emails|messages)"
+                     r"|конфіденційн|конфиденциальн|політик|политик|відписа|отписа|згод|соглас|умов|услови", re.I)
 CODE = re.compile(r"\b(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9-]{5,20}\b")
-CHECK_EMAIL = re.compile(r"check your (email|inbox)|sent (you )?an? (email|code)|on its way to your inbox", re.I)
+CHECK_EMAIL = re.compile(r"check your (email|inbox)|sent (you )?an? (email|code)|on its way to your inbox"
+                         r"|перевірте (пошту|скриньку|email)|проверьте (почту|ящик|email)|надіслали (вам )?лист|отправили (вам )?письмо", re.I)
 OPENER = re.compile(r"^(yes|claim|unlock|get|reveal|spin|continue|sign ?up|join|subscribe|i want|count me in|show)", re.I)
 
 FORM_JS = r"""
 (paId) => {
   const host = document.querySelector(`[data-pa-id="${paId}"]`); if (!host) return null;
-  const deep = sel => [...host.querySelectorAll(sel), ...[host, ...host.querySelectorAll('*')].filter(n => n.shadowRoot).flatMap(n => [...n.shadowRoot.querySelectorAll(sel)])];
+""" + DEEP_JS + r"""
   const vis = el => { const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2; };
   const inputs = deep('input').filter(vis);
   const email = inputs.find(i => i.type === 'email' || /email/i.test(i.name + ' ' + i.placeholder + ' ' + (i.autocomplete || '')));
   const tel = inputs.find(i => i.type === 'tel' || /phone/i.test(i.name + ' ' + i.placeholder));
   const small = deep('p, span, div, small, label').filter(e => vis(e) && e.children.length < 4).map(e => (e.innerText || '').replace(/\s+/g, ' ').trim()).filter(t => t.length > 20 && t.length < 600);
   const buttons = deep('button, [role=button], input[type=submit], a').filter(vis).map(b => (b.innerText || b.value || '').trim()).filter(Boolean).slice(0, 8);
-  return {text: (host.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600), has_email: !!email, has_tel: !!tel, small, buttons};
+  return {text: deepText().slice(0, 600), has_email: !!email, has_tel: !!tel, small, buttons};
 }
 """
 
 FILL_JS = r"""
 ([paId, value]) => {
   const host = document.querySelector(`[data-pa-id="${paId}"]`); if (!host) return 'no host';
-  const deep = sel => [...host.querySelectorAll(sel), ...[host, ...host.querySelectorAll('*')].filter(n => n.shadowRoot).flatMap(n => [...n.shadowRoot.querySelectorAll(sel)])];
+""" + DEEP_JS + r"""
   const email = deep('input').find(i => i.type === 'email' || /email/i.test(i.name + ' ' + i.placeholder + ' ' + (i.autocomplete || '')));
   if (!email) return 'no email field';
   email.focus();
@@ -67,21 +69,14 @@ FILL_JS = r"""
 }
 """
 
-OPEN_JS = r"""
-(paId) => {
-  const host = document.querySelector(`[data-pa-id="${paId}"]`); if (!host) return null;
-  const re = /^(yes|claim|unlock|get|reveal|spin|continue|sign ?up|join|subscribe|i want|count me in|show)/i;
-  const all = [...host.querySelectorAll('button, [role=button], a'), ...[host, ...host.querySelectorAll('*')].filter(n => n.shadowRoot).flatMap(n => [...n.shadowRoot.querySelectorAll('button, [role=button], a')])];
-  const b = all.find(x => re.test((x.innerText || '').trim()));
-  if (b) { b.click(); return (b.innerText || '').trim().slice(0, 40); }
-  return null;
-}
-"""
+OPEN_JS = OPEN_STEP_JS
 
 
 async def find_form(page, seconds=40):
+    """A form with a contact field wins; a signup app's layer without a field (step one of a two-step form,
+    or a promo) is used only if no such form shows up in time."""
     t0 = time.monotonic()
-    answered = False
+    answered, fallback = False, None
     while time.monotonic() - t0 < seconds:
         try:
             snap = await page.evaluate(JS["detect"])
@@ -91,6 +86,8 @@ async def find_form(page, seconds=40):
         for o in snap["overlays"]:
             if o["kind"] == "capture_form":
                 return o
+        if fallback is None or not any(o["pa_id"] == fallback["pa_id"] for o in snap["overlays"]):
+            fallback = next((o for o in snap["overlays"] if o["kind"] == "vendor_overlay" and o.get("on_top")), None)
         if not answered and time.monotonic() - t0 > 12:
             answered = True
             try:
@@ -98,7 +95,7 @@ async def find_form(page, seconds=40):
             except Exception:  # noqa: BLE001
                 pass
         await asyncio.sleep(0.5)
-    return None
+    return fallback
 
 
 async def shot(page, out: Path, name: str):
