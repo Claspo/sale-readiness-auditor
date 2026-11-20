@@ -91,6 +91,8 @@ Copy `draft.json` to `verdicts.json` and complete every item:
 - **Visual checks**: open each screenshot in `screenshots_to_view` (they are in `<folder>/shots/`) and
   read `facts`. Set `status`, `evidence` (what you saw, with the store's own words in quotes and the
   device), and `screenshots` (the files that show it). Follow the item's `read` line in checklist.json.
+- **Auto checks without a status**: a pop-up app showed a layer with no contact field, and the walk found
+  no field behind its main button either. Judge from `screenshots_to_view` whether it is a signup form.
 - **Auto checks**: open the screenshot of every signup form they cite. If the detector mistook something
   (a cart drawer, a size guide, a chat widget counted as a form), correct the status and say why in the
   evidence. Keep their numbers otherwise.

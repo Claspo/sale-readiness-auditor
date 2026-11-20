@@ -47,10 +47,21 @@ whether you allow a test signup, then runs for about 10 minutes. The report land
 ## What it does not do
 
 - It submits nothing except, if you allow it, one email signup with your own address. The cart gets one
-  product; the checkout is only opened.
+  product; the checkout is only opened. On a signup pop-up that shows a button before its email field, it
+  clicks that button once to reach the field and types nothing.
 - It browses from your own internet connection, so pop-ups targeted at other countries may not show.
 - Speed is one lab measurement on your connection: a hint, not a Core Web Vitals report.
 - It audits what a visitor can see. Your pop-up app's settings, A/B tests and analytics are out of view.
+
+## Development
+
+```
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest tests
+```
+
+The tests run the scripts against synthetic pages in headless Chromium and need no network.
 
 ## Privacy
 
